@@ -1,0 +1,23 @@
+# Build output
+target/
+*.class
+
+# Runtime data (generated on first run)
+config.yml
+Proxy/
+Nicks/
+proxies.txt
+servers.txt
+nicks.txt
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log

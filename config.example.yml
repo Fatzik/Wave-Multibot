@@ -1,0 +1,63 @@
+# Wave 1.5 Reworked — Configuration
+# Author: FATZE | https://t.me/nnsquado
+# Copy this file to config.yml and edit as needed.
+# ===================================================
+
+# Console output format
+# 0 = verbose (every connect/disconnect/chat)
+# 1 = stats only (bots online / captcha / messages)
+infoFormat: 1
+
+# ── Bots ────────────────────────────────────────────
+# Number of bots to connect per wave
+botsCount: 10
+
+# Delay between waves (milliseconds)
+joinDelay: 1000
+
+# ── Nicks ───────────────────────────────────────────
+# Use randomly generated nicks
+randomNicks: true
+
+# Length of random nicks (if randomNicks: true)
+randomNicksLength: 8
+
+# ── Passwords ───────────────────────────────────────
+# Use randomly generated passwords for /register & /login
+randomPasswords: false
+
+# Length of random passwords (if randomPasswords: true)
+randomPasswordsLength: 6
+
+# ── Behaviour ───────────────────────────────────────
+# Reconnect bots on disconnect (up to 2 times)
+doubleJoin: true
+
+# Remove servers that trigger bot-protection checks
+antiBotFilter: true
+
+# Make bots move around (helps avoid AFK kicks)
+move: false
+
+# ── Test mode ────────────────────────────────────────
+# Connect only to a single server (for testing)
+testMode: false
+testModeIp: "127.0.0.1:25565"
+
+# ── Auto restart ─────────────────────────────────────
+# Automatically restart the process after N minutes
+autoRestart: false
+autoRestartDelay: 60
+
+# ── Commands ─────────────────────────────────────────
+# Commands sent by bots after joining and registering.
+# Supports: /command, plain chat messages
+commands:
+  - "/say Hello from Wave!"
+  - "/help"
+
+# Delay between each command (milliseconds)
+commandDelay: 1000
+
+# Delay between full command cycles (milliseconds)
+commandLoopDelay: 5000
