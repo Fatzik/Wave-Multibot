@@ -87,6 +87,7 @@ public class SessionListener extends SessionAdapter {
             // Команды — с задержкой после регистрации
             new Thread(() -> {
                 ThreadUtils.sleep(3000L); // ждём регистрацию/логин
+                int cycleCount = 0;
                 while (client.isOnline()) {
                     for (Object obj : Options.commands) {
                         if (!client.isOnline()) break;
@@ -95,6 +96,15 @@ public class SessionListener extends SessionAdapter {
                         } catch (Exception ignored) {}
                         ThreadUtils.sleep(Options.commandDelay);
                     }
+                    cycleCount++;
+
+                    // Смена ника после N циклов
+                    if (Options.nickChange && Options.nickChangeInterval > 0
+                            && cycleCount % Options.nickChangeInterval == 0) {
+                        client.reconnectWithNewNick();
+                        return; // текущий поток завершается — новый бот создаст свой
+                    }
+
                     ThreadUtils.sleep(Options.commandLoopDelay);
                 }
             }).start();

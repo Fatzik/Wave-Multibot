@@ -21,7 +21,7 @@
 |---|---|
 | 🌐 **Мульти-сервер** | Боты подключаются к нескольким серверам одновременно |
 | 🔍 **Автопарсинг** | Каждые 2 минуты парсит свежие серверы с 5 мониторингов |
-| 🔄 **Ротация прокси** | SOCKS4 прокси — автозагрузка или локальный файл |
+| 🔄 **Ротация прокси** | SOCKS4 / SOCKS5 / HTTP — автозагрузка или локальные файлы |
 | 🛡️ **Анти-бот фильтр** | Определяет и удаляет серверы с защитой от ботов |
 | 💬 **Кастомные команды** | Список команд с настраиваемой задержкой |
 | ♻️ **Двойное подключение** | Переподключение при дисконнекте |
@@ -94,11 +94,15 @@ commandLoopDelay: 5000 # задержка между циклами (мс)
 <details>
 <summary>📁 Прокси и ники</summary>
 
-**Прокси** — положи SOCKS4 прокси в `Proxy/socks4.txt` (по одному `ip:port` на строку).  
-Если файл не найден — прокси скачиваются автоматически из открытых источников.
+**Прокси** — положи прокси в папку `Proxy/` в нужный файл (по одному `ip:port` на строку):
+- `Proxy/socks4.txt` — SOCKS4
+- `Proxy/socks5.txt` — SOCKS5
+- `Proxy/http.txt` — HTTP
 
-**Ники** — положи ники в `Nicks/nicks.txt` (по одному на строку) и поставь `randomNicks: false`.  
-Если файл не найден — автоматически генерируется 100 000 случайных ников.
+Можно использовать несколько файлов одновременно. Если ни один не найден — все три типа скачиваются автоматически.
+
+**Ники** — положи ники в `nicks.txt` в корне папки (по одному на строку) и поставь `randomNicks: false`.  
+Если файл пустой или не существует — автоматически генерируется 100 000 случайных ников и сохраняется в `nicks.txt`.
 
 </details>
 
@@ -106,13 +110,16 @@ commandLoopDelay: 5000 # задержка между циклами (мс)
 
 ## 🔍 Источники серверов
 
-Серверы парсятся с пяти мониторингов:
+Серверы парсятся с шести мониторингов:
 
-- [minecraftrating.ru](https://minecraftrating.ru/new-servers/)
-- [tmonitoring.com](https://tmonitoring.com/servers-new/)
-- [monitoringminecraft.ru](https://monitoringminecraft.ru/)
-- [misterlauncher.org](https://misterlauncher.org/servera-novye/)
-- [minecraft-statistic.net](https://minecraft-statistic.net/ru/servers-new/)
+| Сайт | Статус |
+|---|---|
+| [minecraftrating.ru](https://minecraftrating.ru/new-servers/) | ✅ Работает |
+| [tmonitoring.com](https://tmonitoring.com/servers-new/) | ✅ Работает |
+| [gamemonitoring.ru](https://gamemonitoring.ru/minecraft/servers/new/version/minecraft) | ✅ Работает |
+| [minecraft.menu](https://minecraft.menu/minecraft-russia-servers) | ✅ Работает |
+| [topminecraftservers.org](https://topminecraftservers.org/) | ✅ Работает |
+| [minecraft-server-list.com](https://minecraft-server-list.com/) | ✅ Работает |
 
 Каждый сервер проверяется через [mcsrvstat.us API](https://api.mcsrvstat.us) — остаются только **Paper / Purpur / Spigot** серверы. BungeeCord и Velocity отфильтровываются.
 

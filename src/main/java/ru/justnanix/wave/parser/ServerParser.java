@@ -8,6 +8,9 @@ import ru.justnanix.wave.utils.Logger;
 import ru.justnanix.wave.utils.Options;
 import ru.justnanix.wave.utils.ThreadUtils;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -39,7 +42,6 @@ public class ServerParser {
     );
 
     private static final String API_UA  = "Wave-1.5-Reworked-by-FATZE/ServerParser";
-    private static final String API_URL = "https://api.mcsrvstat.us/3/";
 
     private static final String BROWSER_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -52,7 +54,9 @@ public class ServerParser {
             "tmonitoring.com", "monitoringminecraft.ru", "monitoringminecraft.net",
             "misterlauncher.org", "minecraft-statistic.net", "mojang.com",
             "minecraft.net", "adoptium.net", "jitpack.io", "apache.org",
-            "schema.org", "w3.org", "jquery.com", "bootstrapcdn.com"
+            "schema.org", "w3.org", "jquery.com", "bootstrapcdn.com",
+            "gamemonitoring.ru", "minecraft.menu", "topminecraftservers.org",
+            "minecraft-server-list.com", "mcsrvstat.us", "api.mcsrvstat.us"
     ));
 
     private static final Set<String> JUNK_SUFFIXES = new HashSet<>(Arrays.asList(
@@ -72,16 +76,27 @@ public class ServerParser {
         if (Options.testMode) return;
 
         Logger.parserStart("ServerParser");
-        parseServers(true);
-        Logger.parserDone("ServerParser", servers.size());
-        Logger.separator();
 
+        // Запускаем парсинг полностью в фоне — боты стартуют как только появится первый сервер
         new Thread(() -> {
+            parseServers(true);
+            Logger.parserDone("ServerParser", servers.size());
+            Logger.separator();
+
+            // Перепарсинг каждые 2 минуты
             while (true) {
                 ThreadUtils.sleep(120000L);
                 parseServers(false);
             }
-        }, "server-reparse").start();
+        }, "server-parser").start();
+    }
+
+    /** Ждёт пока не появится хотя бы один сервер (вызывается из Wave перед стартом ботов) */
+    public void waitForFirst() {
+        if (Options.testMode) return;
+        while (servers.isEmpty()) {
+            ThreadUtils.sleep(200L);
+        }
     }
 
     private void parseServers(boolean print) {
@@ -89,31 +104,34 @@ public class ServerParser {
 
         raw.addAll(parseMinecraftRating(print));
         raw.addAll(parseTmonitoring(print));
-        raw.addAll(parseMonitoringMinecraft(print));
-        raw.addAll(parseMisterLauncher(print));
-        raw.addAll(parseMinecraftStatistic(print));
+        raw.addAll(parseGamemonitoring(print));
+        raw.addAll(parseMinecraftMenu(print));
+        raw.addAll(parseTopMinecraftServers(print));
+        raw.addAll(parseMinecraftServerList(print));
+
+        // Убираем уже известные серверы чтобы не проверять повторно
+        Set<String> known = new HashSet<>(servers);
+        List<String> toCheck = new ArrayList<>();
+        for (String s : raw) {
+            if (!known.contains(s)) toCheck.add(s);
+        }
 
         if (print)
-            Logger.system("Сырых адресов: " + raw.size() + "  проверяю через mcsrvstat.us...");
+            Logger.system("Сырых адресов: " + toCheck.size() + "  проверяю через mcstatus.io...");
 
-        List<String> filtered = checkViaMcsrvstat(new ArrayList<>(raw), print);
+        // Проверяем — серверы добавляются в список сразу по мере нахождения
+        checkServers(toCheck, print);
 
-        for (String s : filtered)
-            if (!servers.contains(s)) servers.add(s);
-
+        // Дедупликация и перемешивание
         servers = new CopyOnWriteArrayList<>(new HashSet<>(servers));
         Collections.shuffle(servers, Wave.getInstance().getRandom());
     }
 
     // ------------------------------------------------------------------ парсеры ------------------------------------------------------------------
 
-    /**
-     * minecraftrating.ru
-     * IP/домен находится в: <button class="item-control__copy"><span>IP_ИЛИ_ДОМЕН</span>
-     */
+    /** minecraftrating.ru — IP/домен в <button class="item-control__copy"><span> */
     private List<String> parseMinecraftRating(boolean print) {
         List<String> result = new ArrayList<>();
-        // Парсим первые 3 страницы новых серверов
         String[] urls = {
                 "https://minecraftrating.ru/new-servers/",
                 "https://minecraftrating.ru/new-servers/page/2/",
@@ -124,13 +142,11 @@ public class ServerParser {
                 if (print) Logger.parserStart(url);
                 String html = httpGet(url);
                 Document doc = Jsoup.parse(html);
-
                 for (Element btn : doc.select("button.item-control__copy")) {
                     Element span = btn.selectFirst("span");
                     if (span != null) result.addAll(extractFromShortText(span.text().trim()));
                 }
                 result.addAll(extractIpPort(html));
-
                 if (print) Logger.system("minecraftrating.ru  " + result.size() + " адресов");
             } catch (Throwable e) {
                 if (print) Logger.parserError("minecraftrating.ru", e.getMessage());
@@ -139,13 +155,9 @@ public class ServerParser {
         return result;
     }
 
-    /**
-     * tmonitoring.com
-     * IP:PORT прямо в тексте страницы.
-     */
+    /** tmonitoring.com — IP:PORT в тексте страницы */
     private List<String> parseTmonitoring(boolean print) {
         List<String> result = new ArrayList<>();
-        // Парсим первые 3 страницы новых серверов
         String[] urls = {
                 "https://tmonitoring.com/servers-new/",
                 "https://tmonitoring.com/servers-new/page/2/",
@@ -170,55 +182,43 @@ public class ServerParser {
         return result;
     }
 
-    /**
-     * monitoringminecraft.ru / .net
-     */
-    private List<String> parseMonitoringMinecraft(boolean print) {
+    /** gamemonitoring.ru — IP:PORT и домены прямо в тексте таблицы */
+    private List<String> parseGamemonitoring(boolean print) {
         List<String> result = new ArrayList<>();
         String[] urls = {
-                "https://monitoringminecraft.ru/",
-                "https://monitoringminecraft.net/"
+                "https://gamemonitoring.ru/minecraft/servers/new/version/minecraft",
+                "https://gamemonitoring.ru/minecraft/servers/country/ru",
+                "https://gamemonitoring.ru/minecraft/servers/country/ua",
+                "https://gamemonitoring.ru/minecraft/servers/country/by"
         };
         for (String url : urls) {
             try {
                 if (print) Logger.parserStart(url);
                 String html = httpGet(url);
+                // IP:PORT regex
                 result.addAll(extractIpPort(html));
-                if (print) Logger.system("monitoringminecraft  " + result.size() + " адресов");
+                // Домены из ячеек таблицы
+                Document doc = Jsoup.parse(html);
+                for (Element td : doc.select("td")) {
+                    String text = td.ownText().trim();
+                    if (text.contains(".") && text.length() < 80)
+                        result.addAll(extractFromShortText(text));
+                }
+                if (print) Logger.system("gamemonitoring.ru  " + result.size() + " адресов");
             } catch (Throwable e) {
-                if (print) Logger.parserError("monitoringminecraft", e.getMessage());
+                if (print) Logger.parserError("gamemonitoring.ru", e.getMessage());
             }
         }
         return result;
     }
 
-    /**
-     * misterlauncher.org
-     */
-    private List<String> parseMisterLauncher(boolean print) {
-        List<String> result = new ArrayList<>();
-        try {
-            if (print) Logger.parserStart("misterlauncher.org");
-            String html = httpGet("https://misterlauncher.org/servera-novye/");
-            result.addAll(extractIpPort(html));
-            Document doc = Jsoup.parse(html);
-            for (Element el : doc.select("[data-toggle='tooltip'], .tooltip"))
-                result.addAll(extractFromShortText(el.ownText().trim()));
-            if (print) Logger.system("misterlauncher.org  " + result.size() + " адресов");
-        } catch (Throwable e) {
-            if (print) Logger.parserError("misterlauncher.org", e.getMessage());
-        }
-        return result;
-    }
-
-    /**
-     * minecraft-statistic.net
-     */
-    private List<String> parseMinecraftStatistic(boolean print) {
+    /** minecraft.menu — домены серверов в тексте карточек */
+    private List<String> parseMinecraftMenu(boolean print) {
         List<String> result = new ArrayList<>();
         String[] urls = {
-                "https://minecraft-statistic.net/ru/servers-new/",
-                "https://minecraft-statistic.net/ru/servers/"
+                "https://minecraft.menu/minecraft-russia-servers",
+                "https://minecraft.menu/minecraft-servers/new",
+                "https://minecraft.menu/minecraft-servers"
         };
         for (String url : urls) {
             try {
@@ -226,11 +226,72 @@ public class ServerParser {
                 String html = httpGet(url);
                 result.addAll(extractIpPort(html));
                 Document doc = Jsoup.parse(html);
-                for (Element el : doc.select(".copy-ip"))
-                    result.addAll(extractFromShortText(el.text().trim()));
-                if (print) Logger.system("minecraft-statistic.net  " + result.size() + " адресов");
+                // Домены в параграфах и span
+                for (Element el : doc.select("p, span, td, .server-ip, .ip")) {
+                    String text = el.ownText().trim();
+                    if (text.contains(".") && text.length() < 80 && !text.contains(" "))
+                        result.addAll(extractFromShortText(text));
+                }
+                if (print) Logger.system("minecraft.menu  " + result.size() + " адресов");
             } catch (Throwable e) {
-                if (print) Logger.parserError("minecraft-statistic.net", e.getMessage());
+                if (print) Logger.parserError("minecraft.menu", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /** topminecraftservers.org — IP в data-атрибутах и тексте */
+    private List<String> parseTopMinecraftServers(boolean print) {
+        List<String> result = new ArrayList<>();
+        String[] urls = {
+                "https://topminecraftservers.org/",
+                "https://topminecraftservers.org/country/RU",
+                "https://topminecraftservers.org/new"
+        };
+        for (String url : urls) {
+            try {
+                if (print) Logger.parserStart(url);
+                String html = httpGet(url);
+                result.addAll(extractIpPort(html));
+                Document doc = Jsoup.parse(html);
+                for (Element el : doc.select("[data-clipboard-text], .server-ip, .ip-address, .copy")) {
+                    String text = el.attr("data-clipboard-text");
+                    if (text.isEmpty()) text = el.ownText();
+                    text = text.trim();
+                    if (!text.isEmpty() && text.length() < 80)
+                        result.addAll(extractFromShortText(text));
+                }
+                if (print) Logger.system("topminecraftservers.org  " + result.size() + " адресов");
+            } catch (Throwable e) {
+                if (print) Logger.parserError("topminecraftservers.org", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /** minecraft-server-list.com — IP в data-clipboard и тексте */
+    private List<String> parseMinecraftServerList(boolean print) {
+        List<String> result = new ArrayList<>();
+        String[] urls = {
+                "https://minecraft-server-list.com/",
+                "https://minecraft-server-list.com/sort/New/"
+        };
+        for (String url : urls) {
+            try {
+                if (print) Logger.parserStart(url);
+                String html = httpGet(url);
+                result.addAll(extractIpPort(html));
+                Document doc = Jsoup.parse(html);
+                for (Element el : doc.select("[data-clipboard-text], .server-ip, .serverip")) {
+                    String text = el.attr("data-clipboard-text");
+                    if (text.isEmpty()) text = el.ownText();
+                    text = text.trim();
+                    if (!text.isEmpty() && text.length() < 80)
+                        result.addAll(extractFromShortText(text));
+                }
+                if (print) Logger.system("minecraft-server-list.com  " + result.size() + " адресов");
+            } catch (Throwable e) {
+                if (print) Logger.parserError("minecraft-server-list.com", e.getMessage());
             }
         }
         return result;
@@ -261,71 +322,64 @@ public class ServerParser {
         return response.body();
     }
 
-    // ------------------------------------------------------------------ mcsrvstat API ------------------------------------------------------------------
+    // ------------------------------------------------------------------ mcstatus.io API ------------------------------------------------------------------
 
-    private List<String> checkViaMcsrvstat(List<String> addresses, boolean print) {
-        List<String> result = new CopyOnWriteArrayList<>();
-        List<Thread> threads = new ArrayList<>();
-
+    /**
+     * Проверяет серверы через api.mcstatus.io/v2 — надёжный API без ложных offline.
+     * Лимит: 5 req/sec. Слём последовательно с задержкой 220мс между запросами.
+     */
+    private void checkServers(List<String> addresses, boolean print) {
         for (String address : addresses) {
-            Thread t = new Thread(() -> {
-                try {
-                    ServerInfo info = queryMcsrvstat(address);
-                    if (info != null && info.online && !isProxySoftware(info.software)) {
-                        String resolved = info.ip + ":" + info.port;
-                        result.add(resolved);
-                        if (print) Logger.serverFound(resolved, info.software);
-                    } else if (print) {
-                        if (info == null)
-                            Logger.serverSkip(address, "нет ответа");
-                        else if (!info.online)
-                            Logger.serverSkip(address, "offline");
-                        else
-                            Logger.serverSkip(address, "proxy: " + info.software);
-                    }
-                } catch (Throwable ignored) {}
-            });
-            t.setDaemon(true);
-            threads.add(t);
-        }
+            try {
+                ServerInfo info = queryMcstatus(address);
+                if (info != null && info.online && !isProxySoftware(info.software)) {
+                    // Добавляем сразу — боты могут использовать уже сейчас
+                    if (!servers.contains(address)) servers.add(address);
+                    if (print) Logger.serverFound(address, info.software);
+                } else if (print) {
+                    if (info == null)
+                        Logger.serverSkip(address, "нет ответа");
+                    else if (!info.online)
+                        Logger.serverSkip(address, "offline");
+                    else
+                        Logger.serverSkip(address, "proxy: " + info.software);
+                }
+            } catch (Throwable ignored) {}
 
-        // Запускаем батчами по 15 — не перегружаем API
-        int batchSize = 15;
-        for (int i = 0; i < threads.size(); i += batchSize) {
-            List<Thread> batch = threads.subList(i, Math.min(i + batchSize, threads.size()));
-            batch.forEach(Thread::start);
-            // Ждём завершения батча — join без прерывания
-            for (Thread t : batch) {
-                try { t.join(12000); } catch (InterruptedException ignored) {}
-            }
+            // 220мс = ~4.5 req/sec — чуть ниже лимита 5/sec
+            try { Thread.sleep(220); } catch (InterruptedException ignored) {}
         }
-
-        return result;
     }
 
-    private ServerInfo queryMcsrvstat(String address) {
+    private ServerInfo queryMcstatus(String address) {
         try {
-            String json = Jsoup.connect(API_URL + address)
+            String url = "https://api.mcstatus.io/v2/status/java/" + address;
+            String json = Jsoup.connect(url)
                     .userAgent(API_UA)
                     .header("Accept", "application/json")
                     .ignoreContentType(true)
-                    .ignoreHttpErrors(false)
-                    .timeout(10000)
+                    .ignoreHttpErrors(true)
+                    .timeout(8000)
                     .get()
                     .text();
 
-            // Парсим JSON вручную — без Gson, чтобы избежать NoClassDefFoundError в потоках
             ServerInfo info = new ServerInfo();
             info.online = json.contains("\"online\":true");
             if (!info.online) return info;
 
-            info.ip       = extractJsonString(json, "ip",       address.split(":")[0]);
-            info.port     = extractJsonInt   (json, "port",     25565);
-            info.software = extractJsonString(json, "software", null);
+            // software из query (точнее) или version.name
+            String software = extractJsonString(json, "software", null);
+            if (software == null) {
+                // version.name — берём первое слово (например "Paper 1.20.1" → "Paper")
+                String vname = extractJsonString(json, "name", null);
+                if (vname != null) {
+                    vname = vname.replaceAll("§.", "").trim();
+                    software = vname.split("\\s+")[0];
+                }
+            }
+            info.software = software;
             return info;
         } catch (Throwable e) {
-            Logger.parserError("mcsrvstat/" + address,
-                    e.getClass().getSimpleName() + ": " + e.getMessage());
             return null;
         }
     }
@@ -335,13 +389,6 @@ public class ServerParser {
         Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*\"([^\"]+)\"");
         Matcher m = p.matcher(json);
         return m.find() ? m.group(1) : def;
-    }
-
-    /** Извлекает числовое поле из JSON: "key":12345 */
-    private int extractJsonInt(String json, String key, int def) {
-        Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*(\\d+)");
-        Matcher m = p.matcher(json);
-        return m.find() ? Integer.parseInt(m.group(1)) : def;
     }
 
     // ------------------------------------------------------------------ утилиты ------------------------------------------------------------------

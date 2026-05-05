@@ -61,3 +61,9 @@ commandDelay: 1000
 
 # Delay between full command cycles (milliseconds)
 commandLoopDelay: 5000
+
+# Change bot nick after N command cycles (reconnects with a new nick)
+# false = disabled, true = enabled
+nickChange: false
+# How many cycles before changing nick (1 = every cycle, 3 = every 3 cycles)
+nickChangeInterval: 3

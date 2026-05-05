@@ -6,9 +6,9 @@ target/
 config.yml
 Proxy/
 Nicks/
+nicks.txt
 proxies.txt
 servers.txt
-nicks.txt
 
 # IDE
 .vscode/

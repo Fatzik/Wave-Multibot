@@ -5,8 +5,7 @@ import org.yaml.snakeyaml.Yaml;
 import ru.justnanix.wave.bot.Bot;
 import ru.justnanix.wave.parser.NicksParser;
 import ru.justnanix.wave.parser.ProxyParser;
-import ru.justnanix.wave.parser.ServerParser;
-import ru.justnanix.wave.utils.Options;
+import ru.justnanix.wave.parser.ServerParser;import ru.justnanix.wave.utils.Options;
 import ru.justnanix.wave.utils.Statistics;
 import ru.justnanix.wave.utils.StringGenerator;
 import ru.justnanix.wave.utils.ThreadUtils;
@@ -78,6 +77,9 @@ public class Wave {
 
                 Options.commandDelay     = values.containsKey("commandDelay")     ? (int) values.get("commandDelay")     : 1000;
                 Options.commandLoopDelay = values.containsKey("commandLoopDelay") ? (int) values.get("commandLoopDelay") : 5000;
+
+                Options.nickChange         = values.containsKey("nickChange")         && (boolean) values.get("nickChange");
+                Options.nickChangeInterval = values.containsKey("nickChangeInterval") ? (int) values.get("nickChangeInterval") : 1;
             }
 
             instance = this;
@@ -99,6 +101,14 @@ public class Wave {
         proxyParser.init();
         serverParser.init();
         nicksParser.init();
+
+        // Ждём только первый сервер — дальше боты стартуют сразу
+        if (!Options.testMode) {
+            Logger.system("Ожидаю первый рабочий сервер...");
+            serverParser.waitForFirst();
+            Logger.success("Первый сервер найден — запускаю ботов!");
+            Logger.separator();
+        }
 
         if (Options.autoRestart) {
             new Thread(() -> {
@@ -129,20 +139,24 @@ public class Wave {
         }
 
         while (true) {
-            Proxy proxy = proxyParser.nextProxy();
+            ProxyParser.ProxyEntry proxy = proxyParser.nextProxy();
 
             String server = Options.testMode ? Options.testModeIp : serverParser.nextServer();
-            String nick = Options.randomNicks ? StringGenerator.generateStringInt(Options.randomNicksLength) : nicksParser.nextNick();
+            String nick = Options.randomNicks ? StringGenerator.generateNick(Options.randomNicksLength) : nicksParser.nextNick();
 
             for (int i = 0; i < Options.botsCount; i++) {
                 try {
-                    String host = server.split(":")[0];
-                    int port = Integer.parseInt(server.split(":")[1]);
+                    String[] parts = server.split(":");
+                    String host = parts[0];
+                    int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 25565;
 
                     new Thread(
                             () -> new Bot(new MinecraftProtocol(nick), host, port, proxy).connect()
                     ).start();
-                } catch (OutOfMemoryError ignored) {}
+                } catch (OutOfMemoryError ignored) {
+                } catch (Exception e) {
+                    Logger.error("Ошибка запуска бота: " + e.getMessage());
+                }
             }
 
             ThreadUtils.sleep(Options.joinDelay);

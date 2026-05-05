@@ -28,4 +28,7 @@ public class Options {
     public static ArrayList commands;
     public static int commandDelay;      // задержка между командами (мс)
     public static int commandLoopDelay;  // задержка между циклами команд (мс)
+
+    public static boolean nickChange;        // менять ник после каждого цикла команд
+    public static int nickChangeInterval;    // через сколько циклов команд менять ник (0 = каждый раз)
 }
